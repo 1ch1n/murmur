@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+*.log
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local model cache (downloaded at runtime, large)
+models/
+*.bin
+*.onnx
+*.pt
+*.ct2

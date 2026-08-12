@@ -1,0 +1,31 @@
+[project]
+name = "murmur"
+version = "0.2.0"
+description = "Open-source push-to-talk voice dictation for Windows — local Whisper, LLM cleanup, read-aloud. A Wispr Flow alternative you own."
+requires-python = ">=3.10"
+authors = [{ name = "Channing Chasko" }]
+license = { text = "AGPL-3.0-or-later" }
+readme = "README.md"
+
+dependencies = [
+    "PySide6>=6.7.0",
+    "faster-whisper>=1.0.3",
+    "sounddevice>=0.4.7",
+    "soundfile>=0.12.1",
+    "numpy>=1.26.0",
+    "keyboard>=0.13.5",
+    "httpx>=0.27.0",
+    "psutil>=5.9.0",
+    "pywin32>=306; sys_platform == 'win32'",
+    "edge-tts>=6.1.0",
+]
+
+[project.scripts]
+murmur = "murmur.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["murmur*"]
