@@ -42,7 +42,10 @@ class Settings:
     # re-fires on normal copy/paste chords.
     read_aloud_key: str = "f9"
     tts_rate: int = 0              # -10 (slow) .. 10 (fast)
-    tts_voice: str = "en-GB-SoniaNeural"  # Edge neural voice; "" = offline SAPI
+    # Edge neural voice name (see `edge-tts --list-voices`). NOTE: setting
+    # this sends the text being read to Microsoft's Edge TTS service.
+    # "" (default) = fully offline Windows SAPI voice.
+    tts_voice: str = ""
 
     # Cleanup
     cleanup_provider: str = "disabled"   # disabled | anthropic | ollama
@@ -74,7 +77,18 @@ def load_settings() -> Settings:
             raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             return Settings(**{k: v for k, v in raw.items() if k in Settings.__dataclass_fields__})
         except Exception:
-            pass
+            # Don't silently destroy the user's settings (API key, dictionary):
+            # preserve the unreadable file and reset from defaults.
+            import logging
+
+            backup = CONFIG_FILE.with_name("config.json.bak")
+            try:
+                CONFIG_FILE.replace(backup)
+            except OSError:
+                backup = None
+            logging.getLogger(__name__).exception(
+                "config.json unreadable; backed up to %s and reset to defaults", backup
+            )
     s = Settings()
     save_settings(s)
     return s

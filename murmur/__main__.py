@@ -8,9 +8,21 @@ from PySide6.QtWidgets import QApplication
 from murmur.app import MurmurApp
 
 
+def _is_murmur_cmdline(cmd: list[str]) -> bool:
+    """Match `python -m murmur` (adjacent tokens) or the pip-installed
+    `murmur` console script — not unrelated processes like
+    `python -m pip install murmur`."""
+    if not cmd:
+        return False
+    exe = os.path.basename(cmd[0]).lower()
+    if exe in ("murmur.exe", "murmur"):
+        return True
+    return any(a == "-m" and b == "murmur" for a, b in zip(cmd, cmd[1:]))
+
+
 def _already_running() -> bool:
-    """True if another `python -m murmur` process exists (e.g. the desktop
-    shortcut was double-clicked while MURMUR is already in the tray)."""
+    """True if another MURMUR process exists (e.g. the desktop shortcut was
+    double-clicked while MURMUR is already in the tray)."""
     import psutil
 
     me = os.getpid()
@@ -18,8 +30,7 @@ def _already_running() -> bool:
         try:
             if p.info["pid"] == me:
                 continue
-            cmd = p.info.get("cmdline") or []
-            if "-m" in cmd and "murmur" in cmd:
+            if _is_murmur_cmdline(p.info.get("cmdline") or []):
                 return True
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue

@@ -35,7 +35,7 @@ On first run, the `small.en` model (~244 MB) downloads to `%USERPROFILE%\.murmur
 3. **Press and hold Right Alt**, speak, release.
 4. The transcript pastes at the cursor.
 5. **Hold Shift while releasing Right Alt** to skip cleanup for that utterance (raw Whisper output — use for code dictation, name spellings, exact phrasing).
-6. **Select any text and tap F9** to hear it read aloud (neural voice via Edge TTS when online, local SAPI fallback offline). Tap F9 again to stop.
+6. **Select any text and tap F9** to hear it read aloud. Tap F9 again to stop. Uses the fully offline Windows SAPI voice by default; set `tts_voice` in config to a Microsoft Edge neural voice (see `edge-tts --list-voices`) for much better quality — **note that this sends the selected text to Microsoft's Edge TTS service**.
 
 **Tray menu** (right-click the icon, or double-click to open History):
 - Show History — searchable archive + stats
@@ -52,7 +52,7 @@ On first run, the `small.en` model (~244 MB) downloads to `%USERPROFILE%\.murmur
 - **Per-app context:** the cleanup prompt knows whether the cursor is in a code editor, terminal, chat app, mail client, doc editor, or browser — and adapts tone accordingly (e.g. drops trailing periods in chat, preserves identifiers in code).
 - **Custom vocabulary:** terms in the Dictionary tab are biased into Whisper's `initial_prompt` and the cleanup prompt so proper nouns survive transcription.
 - **Hold-Shift-for-raw:** skip cleanup for a single utterance — handy for code or exact phrasing.
-- **Read-aloud (F9):** speaks the current selection with a Microsoft Edge neural voice (`tts_voice` in config — any voice from `edge-tts --list-voices`), falling back to offline SAPI when there's no network. Tap again to stop.
+- **Read-aloud (F9):** speaks the current selection. Offline SAPI voice by default; opt into a Microsoft Edge neural voice via `tts_voice` in config (online — the selected text is sent to Microsoft; falls back to SAPI without network). Tap again to stop.
 - **Single-instance guard:** double-launching just points you at the tray icon instead of spawning a duplicate.
 - **No lone-Alt menu steal:** a phantom F24 is injected during the Alt hold so Windows never yanks focus to the menu bar when you release the push-to-talk key.
 - **Sound cues (optional):** soft blips on start / stop / done / error.
