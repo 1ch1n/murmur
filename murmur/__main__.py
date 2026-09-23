@@ -26,9 +26,16 @@ def _already_running() -> bool:
     import psutil
 
     me = os.getpid()
+    # A wrapper that launched us (`cmd /c start ... python -m murmur`, a
+    # .bat, a PowerShell Start-Process) carries our own arguments in ITS
+    # command line. Ignore ancestors so they never count as a running copy.
+    try:
+        skip = {me, *(a.pid for a in psutil.Process(me).parents())}
+    except psutil.Error:
+        skip = {me}
     for p in psutil.process_iter(["pid", "cmdline"]):
         try:
-            if p.info["pid"] == me:
+            if p.info["pid"] in skip:
                 continue
             if _is_murmur_cmdline(p.info.get("cmdline") or []):
                 return True
