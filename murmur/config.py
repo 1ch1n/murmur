@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 
 APP_NAME = "MURMUR"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.3.0"
 
 DATA_DIR = Path.home() / ".murmur"
 MODELS_DIR = DATA_DIR / "models"

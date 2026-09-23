@@ -3,9 +3,6 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtWidgets import QApplication
-
-from murmur.app import MurmurApp
 
 
 def _is_murmur_cmdline(cmd: list[str]) -> bool:
@@ -13,6 +10,9 @@ def _is_murmur_cmdline(cmd: list[str]) -> bool:
     `murmur` console script — not unrelated processes like
     `python -m pip install murmur`."""
     if not cmd:
+        return False
+    # Headless file transcriptions (`murmur --file ...`) are not the tray app.
+    if any(a in ("--file", "-f") or a.startswith("--file=") for a in cmd[1:]):
         return False
     exe = os.path.basename(cmd[0]).lower()
     if exe in ("murmur.exe", "murmur"):
@@ -38,9 +38,19 @@ def _already_running() -> bool:
 
 
 def main() -> int:
+    from murmur.cli import build_parser, transcribe_file_cmd
+
+    args = build_parser().parse_args()
+    if args.file:
+        return transcribe_file_cmd(args)
+
     if _already_running():
         print("MURMUR is already running (check the system tray).", file=sys.stderr)
         return 0
+
+    from PySide6.QtWidgets import QApplication
+
+    from murmur.app import MurmurApp
 
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("MURMUR")

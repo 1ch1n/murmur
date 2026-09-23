@@ -107,10 +107,15 @@ def make_provider(
     anthropic_model: str = "claude-haiku-4-5",
     ollama_model: str = "llama3.2:3b",
     ollama_base_url: str = "http://localhost:11434",
+    timeout: Optional[float] = None,
 ) -> CleanupProvider:
     kind = (kind or "disabled").lower()
     if kind == "anthropic":
-        return AnthropicProvider(api_key=anthropic_api_key or "", model=anthropic_model)
-    if kind == "ollama":
-        return OllamaProvider(model=ollama_model, base_url=ollama_base_url)
-    return DisabledProvider()
+        p = AnthropicProvider(api_key=anthropic_api_key or "", model=anthropic_model)
+    elif kind == "ollama":
+        p = OllamaProvider(model=ollama_model, base_url=ollama_base_url)
+    else:
+        return DisabledProvider()
+    if timeout is not None:
+        p.timeout = timeout
+    return p
