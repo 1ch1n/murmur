@@ -36,9 +36,9 @@ log = logging.getLogger(__name__)
 
 
 class _EdgeVoiceFetch(QObject):
-    """Fetch the Edge voice list on a plain Python thread and report back
-    on the GUI thread. asyncio + edge-tts stalls inside a QThread on
-    Windows, so this deliberately avoids QThread."""
+    """Fetch the Edge voice list on a pool thread and report back on the
+    GUI thread via a timer poll. (Note for tests: QTest.qWait starves
+    Python threads of the GIL, so wait with processEvents + time.sleep.)"""
 
     done = Signal(list)
 
