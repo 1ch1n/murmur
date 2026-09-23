@@ -54,7 +54,7 @@ class WhisperEngine:
         return self._model is not None
 
     def _build_initial_prompt(self) -> str | None:
-        # Whisper uses initial_prompt as a soft bias — short, comma-separated
+        # Whisper uses initial_prompt as a soft bias, short, comma-separated
         # phrases are most effective. Cap at ~200 chars to stay well under the
         # 224-token prompt budget.
         terms = [t.strip() for t in (self.settings.dictionary or []) if t.strip()]
@@ -78,7 +78,7 @@ class WhisperEngine:
         """Stream timestamped segments for a float32 mono 16kHz buffer.
 
         faster-whisper decodes lazily, so callers iterating this see segments
-        as they are produced — useful for progress on long files.
+        as they are produced, useful for progress on long files.
         """
         audio = self._prepare(audio)
         assert self._model is not None

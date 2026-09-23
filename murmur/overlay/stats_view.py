@@ -139,10 +139,10 @@ class StatsView(QWidget):
         self.t_today = StatTile("today", "0", accent=C.AMBER)
         tiles.addWidget(self.t_today)
 
-        self.t_avg_stt = StatTile("avg stt", "—", accent=C.TEAL)
+        self.t_avg_stt = StatTile("avg stt", "n/a", accent=C.TEAL)
         tiles.addWidget(self.t_avg_stt)
 
-        self.t_avg_clean = StatTile("avg cleanup", "—", accent=C.PURPLE)
+        self.t_avg_clean = StatTile("avg cleanup", "n/a", accent=C.PURPLE)
         tiles.addWidget(self.t_avg_clean)
 
         root.addLayout(tiles)
@@ -207,8 +207,8 @@ class StatsView(QWidget):
         self.t_words.set_value(_fmt_int(words))
         self.t_audio.set_value(_fmt_duration(audio_s))
         self.t_today.set_value(_fmt_int(today))
-        self.t_avg_stt.set_value(_fmt_ms(avg_stt) if avg_stt else "—")
-        self.t_avg_clean.set_value(_fmt_ms(avg_cleanup) if avg_cleanup else "—")
+        self.t_avg_stt.set_value(_fmt_ms(avg_stt) if avg_stt else "n/a")
+        self.t_avg_clean.set_value(_fmt_ms(avg_cleanup) if avg_cleanup else "n/a")
 
         # Top apps
         apps_counter = Counter(t.target_app for t in items if t.target_app)

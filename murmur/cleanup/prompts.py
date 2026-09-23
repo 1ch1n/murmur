@@ -5,7 +5,7 @@ from typing import Iterable, Optional
 
 
 # Per-category guidance injected into the cleanup prompt.
-# Keep tight — long category prompts dilute the core rules.
+# Keep tight, long category prompts dilute the core rules.
 CATEGORY_GUIDANCE: dict[str, str] = {
     "code": (
         "You are in a code editor. Preserve identifiers, snake_case, camelCase, "

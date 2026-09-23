@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 
 APP_NAME = "MURMUR"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
 
 DATA_DIR = Path.home() / ".murmur"
 MODELS_DIR = DATA_DIR / "models"
@@ -38,7 +38,7 @@ class Settings:
 
     # Read-aloud (tap to speak the current selection, tap again to stop).
     # Must NOT be a modifier key: the keyboard lib confuses left/right
-    # variants, and the handler itself sends Ctrl+C — a modifier trigger
+    # variants, and the handler itself sends Ctrl+C, a modifier trigger
     # re-fires on normal copy/paste chords.
     read_aloud_key: str = "f9"
     tts_rate: int = 0              # -10 (slow) .. 10 (fast)
@@ -59,10 +59,14 @@ class Settings:
     # Vocabulary
     dictionary: list[str] = field(default_factory=list)  # proper nouns / tech terms
 
-    # UI
-    pill_width: int = 280
-    pill_height: int = 56
-    pill_bottom_margin: int = 80
+    # UI / widget
+    pill_scale: str = "m"            # s | m | l
+    pill_opacity: float = 1.0        # 0.5 .. 1.0
+    pill_show_waveform: bool = True
+    pill_bottom_margin: int = 80     # default anchor when no saved position
+    pill_x: int | None = None        # saved top-left, logical px, in pill_screen's coords
+    pill_y: int | None = None
+    pill_screen: str = ""            # QScreen.name() the saved position belongs to
 
 
 def _ensure_dirs() -> None:

@@ -1,7 +1,7 @@
 [project]
 name = "murmur"
-version = "0.3.0"
-description = "Open-source push-to-talk voice dictation for Windows — local Whisper, LLM cleanup, read-aloud. A Wispr Flow alternative you own."
+version = "0.4.0"
+description = "Open-source push-to-talk voice dictation for Windows: local Whisper, LLM cleanup, read-aloud. A Wispr Flow alternative you own."
 requires-python = ">=3.10"
 authors = [{ name = "Channing Chasko" }]
 license = { text = "AGPL-3.0-or-later" }
@@ -29,3 +29,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["murmur*"]
+
+[tool.setuptools.package-data]
+murmur = ["assets/fonts/*.ttf", "assets/fonts/*.txt"]

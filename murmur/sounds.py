@@ -9,7 +9,7 @@ log = logging.getLogger(__name__)
 
 
 _SR = 44100
-_DURATION = 0.07  # 70ms blips — short enough not to delay paste
+_DURATION = 0.07  # 70ms blips, short enough not to delay paste
 
 
 def _tone(freq: float, duration: float = _DURATION, gain: float = 0.18) -> np.ndarray:
@@ -27,8 +27,8 @@ def _tone(freq: float, duration: float = _DURATION, gain: float = 0.18) -> np.nd
     return (wave * env * gain).astype(np.float32)
 
 
-_START_BLIP = _tone(880.0)   # A5  — listening
-_STOP_BLIP = _tone(523.25)   # C5  — processing
+_START_BLIP = _tone(880.0)   # A5, listening
+_STOP_BLIP = _tone(523.25)   # C5, processing
 _DONE_BLIP = np.concatenate([_tone(523.25, 0.04), _tone(880.0, 0.05)])
 _ERROR_BLIP = _tone(220.0, 0.18)
 

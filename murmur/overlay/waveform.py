@@ -1,115 +1,128 @@
+"""The voice line: a scrolling oscilloscope trace of the microphone.
+
+Audio arrives in 100 ms blocks (10 Hz). Each block is reduced to a handful
+of signed peaks which queue up; the widget ticks at ~60 Hz and scrolls the
+line left at a constant rate, pulling one queued point per step, so the
+trace moves continuously and shows the real shape of speech: silence is a
+flat line, words are jagged bursts.
+"""
 from __future__ import annotations
 
-import numpy as np
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen
-from PySide6.QtWidgets import QWidget
+import math
+from collections import deque
+from typing import Deque, List
 
+import numpy as np
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
+
+from murmur.overlay.draw import dpx, hairline, snap_c, with_alpha
 from murmur.overlay.styles import C
 
+SAMPLE_RATE = 16000
+POINTS_PER_SEC = 72.0        # scroll speed: one second of speech spans ~72 points
+DB_FLOOR = -50.0
+DB_CEIL = -6.0
 
-class Waveform(QWidget):
-    """Compact VU-meter style bars for the pill. Forked from VoxMemo."""
 
-    def __init__(self, num_bars: int = 18):
-        super().__init__()
-        self.num_bars = num_bars
-        self.levels = np.zeros(num_bars)
-        self.peaks = np.zeros(num_bars)
-        self.is_active = False
+def _db_to_unit(db: float) -> float:
+    return max(0.0, min(1.0, (db - DB_FLOOR) / (DB_CEIL - DB_FLOOR)))
 
-        # Smoothing
-        self.attack = 0.5
-        self.decay = 0.82
-        self.peak_decay = 0.94
 
-        # Idle phase animation
-        self.phase = 0.0
-        self.bar_color = QColor(C.AMBER)
+def rms_db(x: np.ndarray) -> float:
+    if x.size == 0:
+        return DB_FLOOR
+    r = float(np.sqrt(np.mean(x.astype(np.float32) ** 2)))
+    return 20 * math.log10(r + 1e-9)
 
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._tick)
-        self.timer.start(33)  # ~30fps
 
-    def set_samples(self, samples: np.ndarray) -> None:
-        if samples.size == 0:
+class Trace:
+    def __init__(self, n_points: int = 72):
+        self.n = n_points
+        self.buf = np.zeros(n_points, dtype=np.float32)   # newest at the end
+        self.pending: Deque[float] = deque()
+        self.scroll = 0.0
+        self.level = 0.0
+        self._quiet_s = 0.0
+
+    # --- model -----------------------------------------------------------
+
+    def push(self, samples: np.ndarray) -> None:
+        x = np.asarray(samples, dtype=np.float32).ravel()
+        if x.size == 0:
             return
-        chunk_size = max(1, samples.size // self.num_bars)
-        for i in range(self.num_bars):
-            start = i * chunk_size
-            end = min(start + chunk_size, samples.size)
-            if start >= samples.size:
-                break
-            chunk = samples[start:end]
-            rms = float(np.sqrt(np.mean(chunk * chunk)))
-            if rms > self.levels[i]:
-                self.levels[i] = self.levels[i] * (1 - self.attack) + rms * self.attack
-            else:
-                self.levels[i] *= self.decay
-            if self.levels[i] > self.peaks[i]:
-                self.peaks[i] = self.levels[i]
-            else:
-                self.peaks[i] *= self.peak_decay
-
-    def set_active(self, active: bool, color_hex: str | None = None) -> None:
-        self.is_active = active
-        if color_hex:
-            self.bar_color = QColor(color_hex)
-        if not active:
-            self.levels[:] = 0
-            self.peaks[:] = 0
+        self.level = _db_to_unit(rms_db(x))
+        n_new = max(1, int(round(x.size / SAMPLE_RATE * POINTS_PER_SEC)))
+        for part in np.array_split(x, n_new):
+            if part.size == 0:
+                continue
+            i = int(np.argmax(np.abs(part)))
+            peak = float(part[i])
+            # soft compression so quiet speech still reads, loud never clips
+            self.pending.append(math.tanh(3.2 * peak))
+        self._quiet_s = 0.0
 
     def clear(self) -> None:
-        self.levels[:] = 0
-        self.peaks[:] = 0
-        self.update()
+        """Stop feeding; the line scrolls to flat on its own."""
+        self.pending.clear()
+        self.level = 0.0
 
-    def _tick(self) -> None:
-        self.phase += 0.07
-        if not self.is_active:
-            self.levels *= 0.88
-            self.peaks *= 0.92
-        self.update()
+    def reset(self) -> None:
+        self.clear()
+        self.buf[:] = 0.0
+        self.scroll = 0.0
 
-    def paintEvent(self, _e) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def tick(self, dt: float) -> None:
+        if dt <= 0:
+            return
+        # catch up if audio blocks arrived faster than we scrolled
+        rate = POINTS_PER_SEC * (1.0 + min(2.0, len(self.pending) / 14.0))
+        self.scroll += dt * rate
+        while self.scroll >= 1.0:
+            self.scroll -= 1.0
+            v = self.pending.popleft() if self.pending else 0.0
+            self.buf = np.roll(self.buf, -1)
+            self.buf[-1] = v
+        self._quiet_s += dt
+        if self._quiet_s > 0.4:
+            self.level = 0.0
 
-        w, h = self.width(), self.height()
-        cy = h // 2
+    def active(self) -> bool:
+        return bool(self.pending) or bool(np.abs(self.buf).max() > 0.004)
 
-        margin = 4
-        total_w = w - margin * 2
-        gap = 2
-        bar_w = max(2, (total_w - gap * (self.num_bars - 1)) // self.num_bars)
+    # --- painter ---------------------------------------------------------
 
-        peak_color = QColor(self.bar_color)
-        peak_color.setAlpha(110)
+    def paint(self, p: QPainter, rect: QRectF, dpr: float, color: QColor, alive: bool) -> None:
+        """Draw the line. When nothing is happening it is a single crisp
+        hairline; while alive it is an antialiased polyline of the buffer."""
+        p.save()
+        cy = rect.center().y()
+        if not alive and not self.active():
+            p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            y = snap_c(cy, dpr)
+            p.setPen(hairline(color, dpr, 1))
+            p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+            p.restore()
+            return
 
-        max_level = max(float(np.max(self.levels)), 0.001)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        n = self.n
+        spacing = rect.width() / (n - 1)
+        amp = rect.height() / 2
+        pts: List[QPointF] = []
+        for i in range(n):
+            x = rect.left() + (i - self.scroll) * spacing
+            pts.append(QPointF(x, cy - float(self.buf[i]) * amp))
+        # one extra point past the right edge keeps the scroll seamless
+        pts.append(QPointF(rect.left() + (n - self.scroll) * spacing, cy))
+        pen = QPen(color, dpx(max(1, int(1.25 * dpr)), dpr))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        p.setClipRect(rect.adjusted(-dpx(1, dpr), -amp, dpx(1, dpr), amp))
+        p.drawPolyline(pts)
+        p.restore()
 
-        for i in range(self.num_bars):
-            x = margin + i * (bar_w + gap)
 
-            if self.is_active or np.max(self.levels) > 0.001:
-                level = self.levels[i] / max_level
-                bar_h = int(level * (h // 2 - 2))
-                bar_h = max(1, min(bar_h, h // 2 - 1))
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(self.bar_color))
-                p.drawRoundedRect(x, cy - bar_h, bar_w, bar_h * 2, 1, 1)
-                if self.peaks[i] > 0.01:
-                    peak_h = int((self.peaks[i] / max_level) * (h // 2 - 2))
-                    peak_h = max(1, min(peak_h, h // 2 - 1))
-                    p.setBrush(QBrush(peak_color))
-                    p.drawRect(x, cy - peak_h - 1, bar_w, 1)
-                    p.drawRect(x, cy + peak_h, bar_w, 1)
-            else:
-                # idle shimmer
-                wave = np.sin(self.phase + i * 0.4) * 0.3 + 0.4
-                bar_h = max(1, int(wave * 3))
-                idle = QColor(C.TEXT_DIM)
-                idle.setAlpha(120)
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(idle))
-                p.drawRoundedRect(x, cy - bar_h, bar_w, bar_h * 2, 1, 1)
+# Back-compat name used by the smoke test and older callers.
+Waveform = Trace

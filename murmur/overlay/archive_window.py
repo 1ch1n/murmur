@@ -25,73 +25,9 @@ from PySide6.QtWidgets import (
 
 from murmur.archive import Archive, Transcript
 from murmur.overlay.stats_view import StatsView
-from murmur.overlay.styles import C
+from murmur.overlay.styles import C, build_qss
 
 log = logging.getLogger(__name__)
-
-
-ARCHIVE_STYLE = f"""
-* {{ font-family: 'Consolas', 'Courier New', monospace; }}
-
-QMainWindow {{ background: {C.BG}; }}
-QWidget {{ background: transparent; color: {C.TEXT}; }}
-
-QLabel {{ color: {C.TEXT_DIM}; font-size: 10px; letter-spacing: 2px; }}
-QLabel#title {{ color: {C.AMBER}; font-size: 18px; font-weight: 300; letter-spacing: 6px; }}
-QLabel#status {{ color: {C.PURPLE}; font-size: 10px; letter-spacing: 1px; }}
-QLabel#empty {{ color: {C.TEXT_DIM}; font-size: 11px; letter-spacing: 1px; }}
-
-QLineEdit {{
-    background: {C.PANEL}; border: 1px solid {C.BORDER}; border-radius: 3px;
-    color: {C.TEXT}; font-size: 12px; padding: 7px 10px;
-    selection-background-color: {C.AMBER_DIM};
-}}
-QLineEdit:focus {{ border-color: {C.AMBER_DIM}; }}
-
-QTextEdit {{
-    background: {C.PANEL}; border: 1px solid {C.BORDER}; border-radius: 3px;
-    color: {C.TEXT}; font-size: 13px; padding: 10px;
-    selection-background-color: {C.AMBER_DIM};
-}}
-QTextEdit:focus {{ border-color: {C.AMBER_DIM}; }}
-
-QPushButton {{
-    background: {C.SURFACE}; border: 1px solid {C.BORDER}; border-radius: 3px;
-    color: {C.TEXT}; font-size: 10px; font-weight: 600; letter-spacing: 1px;
-    padding: 7px 14px; min-width: 60px;
-}}
-QPushButton:hover {{ background: {C.BORDER}; border-color: {C.BORDER_HI}; }}
-QPushButton:pressed {{ background: {C.BORDER_HI}; }}
-
-QPushButton#small {{ min-width: 40px; padding: 5px 10px; font-size: 9px; }}
-QPushButton#danger {{ color: {C.RED}; border-color: {C.BORDER}; }}
-QPushButton#danger:hover {{ background: {C.RED}; color: {C.BG}; border-color: {C.RED}; }}
-QPushButton#accent {{ color: {C.AMBER}; border-color: {C.AMBER_DIM}; }}
-QPushButton#accent:hover {{ background: {C.AMBER_DIM}; color: {C.BG}; }}
-
-QScrollArea {{ border: none; background: transparent; }}
-QScrollBar:vertical {{ background: {C.BG}; width: 6px; margin: 0; }}
-QScrollBar::handle:vertical {{ background: {C.BORDER_HI}; border-radius: 3px; min-height: 30px; }}
-QScrollBar::handle:vertical:hover {{ background: {C.PURPLE}; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-
-QFrame#card {{ background: {C.SURFACE}; border: 1px solid {C.BORDER}; border-radius: 3px; }}
-QFrame#card:hover {{ border-color: {C.PURPLE}; }}
-QFrame#card[selected="true"] {{ border-color: {C.AMBER_DIM}; background: {C.PANEL}; }}
-
-QFrame#divider {{ background: {C.BORDER}; max-height: 1px; min-height: 1px; }}
-
-QTabWidget::pane {{ border: 1px solid {C.BORDER}; border-radius: 3px; top: -1px; }}
-QTabBar::tab {{
-    background: {C.SURFACE}; color: {C.TEXT_DIM}; padding: 6px 16px;
-    font-size: 10px; letter-spacing: 2px; border: 1px solid {C.BORDER};
-    border-bottom: none; border-top-left-radius: 3px; border-top-right-radius: 3px;
-    margin-right: 2px;
-}}
-QTabBar::tab:selected {{ background: {C.PANEL}; color: {C.AMBER}; border-color: {C.AMBER_DIM}; }}
-QTabBar::tab:hover {{ color: {C.TEXT}; }}
-"""
 
 
 class TranscriptCard(QFrame):
@@ -174,9 +110,9 @@ class ArchiveWindow(QMainWindow):
         self._selected_card: Optional[TranscriptCard] = None
         self._cards: list[TranscriptCard] = []
 
-        self.setWindowTitle("MURMUR — HISTORY")
+        self.setWindowTitle("MURMUR: HISTORY")
         self.resize(820, 600)
-        self.setStyleSheet(ARCHIVE_STYLE)
+        self.setStyleSheet(build_qss("archive"))
         self._build()
         self._refresh()
 
@@ -312,7 +248,7 @@ class ArchiveWindow(QMainWindow):
         return page
 
     def _on_tab_changed(self, index: int) -> None:
-        # Tab 1 = STATS — refresh aggregates whenever it's shown.
+        # Tab 1 = STATS, refresh aggregates whenever it's shown.
         if index == 1:
             self.stats_view.refresh(self.archive.all())
 

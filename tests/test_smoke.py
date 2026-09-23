@@ -1,4 +1,4 @@
-"""Import smoke test — verifies the package wires together without launching the GUI."""
+"""Import smoke test, verifies the package wires together without launching the GUI."""
 from __future__ import annotations
 
 

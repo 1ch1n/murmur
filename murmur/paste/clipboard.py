@@ -77,6 +77,6 @@ def copy_selection() -> str:
                 lambda: cb.setText(previous),
             )
         else:
-            # Nothing was copied — put the user's clipboard back right away.
+            # Nothing was copied, put the user's clipboard back right away.
             cb.setText(previous)
     return text

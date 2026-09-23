@@ -7,7 +7,7 @@ import sys
 
 def _is_murmur_cmdline(cmd: list[str]) -> bool:
     """Match `python -m murmur` (adjacent tokens) or the pip-installed
-    `murmur` console script — not unrelated processes like
+    `murmur` console script, not unrelated processes like
     `python -m pip install murmur`."""
     if not cmd:
         return False
@@ -55,14 +55,26 @@ def main() -> int:
         print("MURMUR is already running (check the system tray).", file=sys.stderr)
         return 0
 
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
-    from murmur.app import MurmurApp
+    # Fractional scale factors (125%, 150%) pass through untouched; the widget
+    # snaps its own geometry to device pixels, so rounding here would only
+    # make things blurrier.
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
 
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("MURMUR")
     qt_app.setQuitOnLastWindowClosed(False)  # tray-resident
     qt_app.setStyle("Fusion")
+
+    from murmur.overlay.fonts import register_fonts
+
+    register_fonts()
+
+    from murmur.app import MurmurApp
 
     app = MurmurApp(qt_app)
     app.start()

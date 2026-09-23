@@ -46,7 +46,7 @@ class PushToTalkHotkey(QObject):
             self._release_handle = None
 
     # Alt released with no other key in between makes Windows move focus
-    # to the focused app's menu bar — which yanks the caret out of the
+    # to the focused app's menu bar, which yanks the caret out of the
     # textbox we're about to paste into. Injecting a dummy F24 while Alt
     # is held makes the press "not lone", so menu activation never fires.
     _ALT_NAMES = {"alt", "left alt", "right alt", "alt gr"}
@@ -78,7 +78,7 @@ class PushToTalkHotkey(QObject):
 
 
 class TapHotkey(QObject):
-    """Global tap hotkey — fires once per physical press.
+    """Global tap hotkey, fires once per physical press.
 
     Gated on press/release like PushToTalkHotkey, because Windows key
     autorepeat delivers a stream of press events while the key is held.

@@ -26,69 +26,9 @@ from PySide6.QtWidgets import (
 )
 
 from murmur.config import Settings
-from murmur.overlay.styles import C
+from murmur.overlay.styles import build_qss
 
 log = logging.getLogger(__name__)
-
-
-SETTINGS_STYLE = f"""
-* {{ font-family: 'Consolas', 'Courier New', monospace; }}
-
-QMainWindow {{ background: {C.BG}; }}
-QWidget {{ background: transparent; color: {C.TEXT}; }}
-
-QLabel {{ color: {C.TEXT_DIM}; font-size: 10px; letter-spacing: 1px; }}
-QLabel#title {{ color: {C.AMBER}; font-size: 16px; font-weight: 300; letter-spacing: 5px; }}
-QLabel#hint {{ color: {C.TEXT_DIM}; font-size: 9px; letter-spacing: 0; }}
-QLabel#status {{ color: {C.PURPLE}; font-size: 10px; letter-spacing: 1px; }}
-
-QTabWidget::pane {{ border: 1px solid {C.BORDER}; border-radius: 3px; top: -1px; }}
-QTabBar::tab {{
-    background: {C.SURFACE}; color: {C.TEXT_DIM}; padding: 6px 16px;
-    font-size: 10px; letter-spacing: 2px; border: 1px solid {C.BORDER};
-    border-bottom: none; border-top-left-radius: 3px; border-top-right-radius: 3px;
-    margin-right: 2px;
-}}
-QTabBar::tab:selected {{ background: {C.PANEL}; color: {C.AMBER}; border-color: {C.AMBER_DIM}; }}
-QTabBar::tab:hover {{ color: {C.TEXT}; }}
-
-QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
-    background: {C.PANEL}; border: 1px solid {C.BORDER}; border-radius: 3px;
-    color: {C.TEXT}; font-size: 11px; padding: 5px 8px;
-    selection-background-color: {C.AMBER_DIM};
-}}
-QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-    border-color: {C.AMBER_DIM};
-}}
-
-QComboBox::drop-down {{ border: none; width: 18px; }}
-QComboBox::down-arrow {{
-    border-left: 4px solid transparent; border-right: 4px solid transparent;
-    border-top: 5px solid {C.TEXT_DIM}; margin-right: 6px;
-}}
-QComboBox QAbstractItemView {{
-    background: {C.PANEL}; border: 1px solid {C.BORDER}; color: {C.TEXT};
-    selection-background-color: {C.AMBER_DIM};
-}}
-
-QCheckBox {{ color: {C.TEXT}; font-size: 11px; spacing: 8px; }}
-QCheckBox::indicator {{
-    width: 14px; height: 14px; border: 1px solid {C.BORDER}; background: {C.PANEL};
-    border-radius: 2px;
-}}
-QCheckBox::indicator:checked {{ background: {C.AMBER}; border-color: {C.AMBER_DIM}; }}
-
-QPushButton {{
-    background: {C.SURFACE}; border: 1px solid {C.BORDER}; border-radius: 3px;
-    color: {C.TEXT}; font-size: 10px; font-weight: 600; letter-spacing: 1px;
-    padding: 7px 14px; min-width: 60px;
-}}
-QPushButton:hover {{ background: {C.BORDER}; border-color: {C.BORDER_HI}; }}
-QPushButton#primary {{ color: {C.AMBER}; border-color: {C.AMBER_DIM}; }}
-QPushButton#primary:hover {{ background: {C.AMBER_DIM}; color: {C.BG}; }}
-
-QFrame#divider {{ background: {C.BORDER}; max-height: 1px; min-height: 1px; }}
-"""
 
 
 MODELS = ["tiny.en", "base.en", "small.en", "medium.en"]
@@ -106,15 +46,16 @@ COMMON_KEYS = [
 
 
 class SettingsWindow(QMainWindow):
-    """Tabbed settings editor. Applies changes via signal — never edits config.json directly."""
+    """Tabbed settings editor. Applies changes via signal, never edits config.json directly."""
 
     applied = Signal(Settings)
+    reset_position_requested = Signal()
 
     def __init__(self, settings: Settings):
         super().__init__()
-        self.setWindowTitle("MURMUR — SETTINGS")
-        self.resize(640, 580)
-        self.setStyleSheet(SETTINGS_STYLE)
+        self.setWindowTitle("MURMUR: SETTINGS")
+        self.resize(640, 600)
+        self.setStyleSheet(build_qss("settings"))
         self._settings = settings
         self._build()
         self.refresh_from(settings)
@@ -139,6 +80,7 @@ class SettingsWindow(QMainWindow):
         tabs.addTab(self._build_stt_tab(), "STT")
         tabs.addTab(self._build_cleanup_tab(), "CLEANUP")
         tabs.addTab(self._build_dict_tab(), "DICTIONARY")
+        tabs.addTab(self._build_widget_tab(), "WIDGET")
         root.addWidget(tabs, 1)
 
         # action row
@@ -194,7 +136,8 @@ class SettingsWindow(QMainWindow):
 
         hint = QLabel(
             "MURMUR runs in the system tray. Hold the push-to-talk key, speak, release. "
-            "Right-click the tray icon for History, Settings, or Quit."
+            "Click the floating widget for History, Settings, file transcription, or Quit. "
+            "Drag it anywhere; the position is remembered."
         )
         hint.setObjectName("hint")
         hint.setWordWrap(True)
@@ -276,7 +219,7 @@ class SettingsWindow(QMainWindow):
         hint = QLabel(
             "Cleanup removes filler, adds punctuation, and lightly fixes grammar without "
             "changing meaning. Hold the raw-modifier (e.g. Shift) while releasing PTT to "
-            "skip cleanup for one utterance — useful for code dictation. "
+            "skip cleanup for one utterance, useful for code dictation. "
             "API key is stored locally in plaintext at ~/.murmur/config.json."
         )
         hint.setObjectName("hint")
@@ -308,10 +251,49 @@ class SettingsWindow(QMainWindow):
 
         return w
 
+    def _build_widget_tab(self) -> QWidget:
+        w = QWidget()
+        form = QFormLayout(w)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setVerticalSpacing(10)
+
+        self.f_scale = QComboBox()
+        for label, key in (("Small", "s"), ("Medium", "m"), ("Large", "l")):
+            self.f_scale.addItem(label, userData=key)
+        form.addRow(QLabel("SIZE"), self.f_scale)
+
+        self.f_opacity = QSpinBox()
+        self.f_opacity.setRange(40, 100)
+        self.f_opacity.setSingleStep(5)
+        self.f_opacity.setSuffix(" %")
+        form.addRow(QLabel("OPACITY"), self.f_opacity)
+
+        self.f_wave = QCheckBox("Show the voice line while idle")
+        form.addRow(QLabel(""), self.f_wave)
+
+        reset_btn = QPushButton("RESET POSITION")
+        reset_btn.clicked.connect(self.reset_position_requested.emit)
+        form.addRow(QLabel("POSITION"), reset_btn)
+
+        hint = QLabel(
+            "Drag the widget anywhere on any monitor; the spot is saved. "
+            "Click it to open the menu, right-click for the same menu, Esc to close. "
+            "Reset puts it back at the bottom-center of the primary display."
+        )
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        form.addRow(QLabel(""), hint)
+
+        return w
+
     # --- state ----------------------------------------------------------
 
     def refresh_from(self, s: Settings) -> None:
         """Populate fields from `s`. Also re-queries input devices."""
+        # The live settings become the baseline for the next APPLY, so fields
+        # the app changes outside this dialog (widget position) survive.
+        self._settings = s
+
         # Devices
         self.f_input.clear()
         self.f_input.addItem("Default", userData=None)
@@ -360,6 +342,16 @@ class SettingsWindow(QMainWindow):
         # Dictionary
         self.f_dict.setPlainText("\n".join(s.dictionary))
 
+        # Widget
+        idx_scale = 1
+        for i in range(self.f_scale.count()):
+            if self.f_scale.itemData(i) == (s.pill_scale or "m").lower():
+                idx_scale = i
+                break
+        self.f_scale.setCurrentIndex(idx_scale)
+        self.f_opacity.setValue(int(round(max(0.4, min(1.0, s.pill_opacity)) * 100)))
+        self.f_wave.setChecked(s.pill_show_waveform)
+
         self.status.setText("")
 
     def _set_combo_text(self, cb: QComboBox, value: str) -> None:
@@ -394,6 +386,9 @@ class SettingsWindow(QMainWindow):
             ollama_base_url=self.f_ollama_url.text().strip() or "http://localhost:11434",
             cleanup_timeout_s=float(self.f_timeout.value()),
             dictionary=dictionary,
+            pill_scale=self.f_scale.currentData() or "m",
+            pill_opacity=self.f_opacity.value() / 100.0,
+            pill_show_waveform=self.f_wave.isChecked(),
         )
 
     def _apply(self) -> None:
