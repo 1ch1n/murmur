@@ -52,7 +52,7 @@ It never takes keyboard focus, so the caret in whatever you were typing into sta
 
 ## Read aloud
 
-Select text anywhere and tap **F9**. While it is reading, F9 pauses and resumes. Click the widget and choose **Read aloud…** for the reader window: paste anything, press Play, jump back and forward a sentence at a time with Previous / Next or Ctrl+Left / Ctrl+Right, click into a sentence and press Play to start there, Ctrl+Space to pause. The sentence being read is highlighted as it goes. Pausing is instant on both voices: the offline Windows voice pauses mid-sentence natively and the Edge neural voice resumes from where it stopped, with the next sentence fetched ahead of time so there is no gap.
+Select text anywhere and tap **F9**. While it is reading, F9 pauses and resumes. Click the widget and choose **Read aloud…** for the reader window: paste anything, press Play, jump back and forward a sentence at a time with Previous / Next or Ctrl+Left / Ctrl+Right, click into a sentence and press Play to start there, Ctrl+Space to pause. The sentence being read is highlighted as it goes. Pick a voice in the same window: the Windows voices installed on your machine work offline; the Microsoft Edge neural voices (English by default, tick All languages for the rest) are fetched once and cached, and send the text to Microsoft when used. Your choice is saved to `tts_voice` in config. Pausing is instant on both voices: the offline Windows voice pauses mid-sentence natively and the Edge neural voice resumes from where it stopped, with the next sentence fetched ahead of time so there is no gap.
 
 **Tray menu** (right-click the icon, or double-click to open History):
 - Show History, searchable archive + stats

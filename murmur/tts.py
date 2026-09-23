@@ -27,6 +27,96 @@ _SVSF_PURGE_BEFORE_SPEAK = 2
 
 Span = Tuple[int, int, str]   # start, end, text
 
+# --- voices -----------------------------------------------------------------
+#
+# `tts_voice` in config is one of:
+#   ""                      the default Windows (SAPI) voice, offline
+#   "sapi:<description>"    a specific installed Windows voice, offline
+#   "en-GB-SoniaNeural"     a Microsoft Edge neural voice, online
+
+SAPI_PREFIX = "sapi:"
+
+
+def is_edge_voice(voice: str) -> bool:
+    return bool(voice) and not voice.startswith(SAPI_PREFIX)
+
+
+def voice_label(voice: str) -> str:
+    if not voice:
+        return "Windows default"
+    if voice.startswith(SAPI_PREFIX):
+        return voice[len(SAPI_PREFIX):].replace(" Desktop", "")
+    return edge_label(voice)
+
+
+def edge_label(short_name: str, gender: str = "") -> str:
+    """'en-GB-SoniaNeural' -> 'Sonia  en-GB' (with gender if known)."""
+    parts = short_name.split("-")
+    if len(parts) >= 3:
+        name = parts[-1].replace("Neural", "").replace("Multilingual", " (multilingual)")
+        locale = "-".join(parts[:2])
+        g = f"  {gender.lower()}" if gender else ""
+        return f"{name}  {locale}{g}"
+    return short_name
+
+
+def list_sapi_voices() -> List[Tuple[str, str]]:
+    """[(value, label)] for installed Windows voices. Value is 'sapi:<desc>'."""
+    try:
+        import pythoncom
+        import win32com.client
+
+        pythoncom.CoInitialize()
+        v = win32com.client.Dispatch("SAPI.SpVoice")
+        toks = v.GetVoices()
+        out = []
+        for i in range(toks.Count):
+            desc = toks.Item(i).GetDescription()
+            out.append((SAPI_PREFIX + desc, desc.replace(" Desktop", "")))
+        return out
+    except Exception:
+        log.exception("could not list SAPI voices")
+        return []
+
+
+def _edge_cache_path():
+    from murmur.config import DATA_DIR
+
+    return DATA_DIR / "edge_voices.json"
+
+
+def load_cached_edge_voices() -> List[dict]:
+    import json
+
+    try:
+        p = _edge_cache_path()
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        log.exception("edge voice cache unreadable")
+    return []
+
+
+def fetch_edge_voices() -> List[dict]:
+    """Online: the full Edge voice list as [{short_name, gender, locale}],
+    written to the cache on success."""
+    import asyncio
+    import json
+
+    import edge_tts
+
+    raw = asyncio.run(edge_tts.list_voices())
+    voices = [
+        {"short_name": v["ShortName"], "gender": v.get("Gender", ""), "locale": v.get("Locale", "")}
+        for v in raw
+    ]
+    voices.sort(key=lambda v: (v["locale"], v["short_name"]))
+    try:
+        _edge_cache_path().write_text(json.dumps(voices), encoding="utf-8")
+    except Exception:
+        log.exception("could not write edge voice cache")
+    return voices
+
 
 def split_sentences(text: str) -> List[Span]:
     """Sentence spans over the original text. Boundaries: sentence-ending
@@ -189,10 +279,13 @@ class ReaderWorker(QThread):
                 self.state_changed.emit("stopped")
             return True
         if name == "voice":
+            changed = (self.rate, self.voice) != (args[0], args[1])
             self.rate, self.voice = args[0], args[1]
             self._cache.clear()
             self._prefetch = None
-            return False
+            self._sapi_selected = None
+            # A new voice takes effect from the current sentence.
+            return changed and self._playing and not self._paused
         if name == "play":
             if args and args[0] is not None:
                 self.idx = max(0, min(len(self.sentences), int(args[0])))
@@ -264,13 +357,32 @@ class ReaderWorker(QThread):
 
     def _speak(self, idx: int) -> bool:
         text = self.sentences[idx]
-        if self.voice:
+        if is_edge_voice(self.voice):
             try:
                 return self._speak_edge(idx, text)
             except Exception:
                 log.exception("edge TTS failed, falling back to SAPI")
                 self.error.emit("Edge voice unavailable, using the offline voice")
         return self._speak_sapi(idx, text)
+
+    def _select_sapi_voice(self, voice) -> None:
+        """Point the SpVoice at the configured Windows voice, if any."""
+        want = self.voice[len(SAPI_PREFIX):] if self.voice.startswith(SAPI_PREFIX) else ""
+        if want == getattr(self, "_sapi_selected", None):
+            return
+        try:
+            toks = voice.GetVoices()
+            chosen = None
+            for i in range(toks.Count):
+                t = toks.Item(i)
+                if not want or t.GetDescription() == want:
+                    chosen = t
+                    break
+            if chosen is not None:
+                voice.Voice = chosen
+            self._sapi_selected = want
+        except Exception:
+            log.exception("could not select SAPI voice %r", want)
 
     # Edge neural voice (online), with one-sentence prefetch.
     def _synth_edge(self, gen: int, idx: int, text: str):
@@ -354,6 +466,7 @@ class ReaderWorker(QThread):
             if self._sapi is None:
                 self._sapi = win32com.client.Dispatch("SAPI.SpVoice")
             voice = self._sapi
+            self._select_sapi_voice(voice)
             voice.Rate = max(-10, min(10, self.rate))
             voice.Speak(text, _SVSF_ASYNC)
             while not voice.WaitUntilDone(40):

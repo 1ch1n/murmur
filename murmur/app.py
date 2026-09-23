@@ -299,10 +299,12 @@ class MurmurApp(QObject):
         log.info("settings updated")
         old = self.settings
 
-        # The dialog never owns the widget position; carry the live one over.
+        # The dialog never owns the widget position or the reader voice;
+        # carry the live values over.
         new_settings = replace(
             new_settings,
             pill_x=old.pill_x, pill_y=old.pill_y, pill_screen=old.pill_screen,
+            tts_rate=old.tts_rate, tts_voice=old.tts_voice,
         )
         self.settings = new_settings
         save_settings(new_settings)
@@ -395,7 +397,8 @@ class MurmurApp(QObject):
         if self.reader_window is None:
             from murmur.overlay.reader_window import ReaderWindow
 
-            w = ReaderWindow(rate=self.settings.tts_rate)
+            w = ReaderWindow(rate=self.settings.tts_rate, voice=self.settings.tts_voice)
+            w.voice_changed.connect(self._on_reader_voice)
             w.play_requested.connect(self._reader_play)
             w.toggle_requested.connect(self.reader.toggle)
             w.stop_requested.connect(self.reader.stop)
@@ -415,6 +418,12 @@ class MurmurApp(QObject):
         self.settings = replace(self.settings, tts_rate=int(rate))
         save_settings(self.settings)
         self.reader.set_voice(self.settings.tts_rate, self.settings.tts_voice)
+
+    def _on_reader_voice(self, voice: str) -> None:
+        self.settings = replace(self.settings, tts_voice=voice or "")
+        save_settings(self.settings)
+        self.reader.set_voice(self.settings.tts_rate, self.settings.tts_voice)
+        log.info("read-aloud voice: %s", voice or "windows default")
 
     def _on_reader_sentence(self, idx: int) -> None:
         if self.reader_window is not None:
