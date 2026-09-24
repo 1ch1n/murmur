@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 import sys
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
@@ -23,9 +24,10 @@ from murmur.overlay.archive_window import ArchiveWindow
 from murmur.overlay.pill import Pill, PillPrefs, PillState
 from murmur.paste.clipboard import copy_selection, paste_text
 from murmur.paste.foreground import ForegroundWindow, get_foreground_window
-from murmur.stt.engine import WhisperEngine
+from murmur.stt.engine import WhisperEngine, make_engine
 from murmur.stt.file import AUDIO_EXTENSIONS
 from murmur.stt.file_job import FileTranscriber
+from murmur.stt.streaming import find_commit
 from murmur.tray import Tray
 from murmur.tts import ReaderWorker, split_sentences
 
@@ -63,17 +65,18 @@ def transcript_meta(t: Transcript) -> str:
 
 
 class ModelLoader(QThread):
-    """Loads the Whisper model off the GUI thread."""
+    """Loads and warms the STT model off the GUI thread."""
     ready = Signal()
     failed = Signal(str)
 
-    def __init__(self, engine: WhisperEngine):
+    def __init__(self, engine):
         super().__init__()
         self.engine = engine
 
     def run(self) -> None:
         try:
             self.engine.load()
+            self.engine.warmup()
             self.ready.emit()
         except Exception as e:
             log.exception("model load failed")
@@ -83,9 +86,14 @@ class ModelLoader(QThread):
 class Transcriber(QThread):
     """Runs transcription + (optional) cleanup off the GUI thread.
 
+    With streaming, `prefix` holds futures for phrases already committed
+    while the key was held and `audio` is only the tail after the last
+    commit. If any prefix failed, the whole utterance is decoded again
+    from `full_audio` so nothing is lost.
+
     Emits `done(payload)` with a dict of:
       raw_text, final_text, transcribe_ms, cleanup_ms, audio_duration_s, target_app,
-      target_category, cleanup_provider
+      target_category, cleanup_provider, raw_mode
     """
 
     done = Signal(dict)
@@ -93,11 +101,13 @@ class Transcriber(QThread):
 
     def __init__(
         self,
-        engine: WhisperEngine,
+        engine,
         cleanup_provider: CleanupProvider,
         audio: np.ndarray,
         context: CleanupContext,
         raw_mode: bool,
+        prefix: Optional[List[Future]] = None,
+        full_audio: Optional[np.ndarray] = None,
     ):
         super().__init__()
         self.engine = engine
@@ -105,14 +115,31 @@ class Transcriber(QThread):
         self.audio = audio
         self.context = context
         self.raw_mode = raw_mode
+        self.prefix = prefix or []
+        self.full_audio = full_audio if full_audio is not None else audio
 
     def run(self) -> None:
         try:
-            audio_dur = self.audio.size / 16000
+            audio_dur = self.full_audio.size / 16000
 
             t0 = time.perf_counter()
-            raw = self.engine.transcribe(self.audio)
+            tail = self.engine.transcribe(self.audio) if self.audio.size > 1600 else ""
             transcribe_ms = int((time.perf_counter() - t0) * 1000)
+
+            parts: List[str] = []
+            try:
+                for f in self.prefix:
+                    parts.append((f.result(timeout=15) or "").strip())
+            except Exception:
+                log.exception("a streamed phrase failed; decoding the whole utterance")
+                parts = []
+                t1 = time.perf_counter()
+                tail = self.engine.transcribe(self.full_audio)
+                transcribe_ms = int((time.perf_counter() - t1) * 1000)
+            raw = " ".join(p for p in parts + [tail.strip()] if p).strip()
+            if self.prefix:
+                log.info("streamed: %d phrases committed while held, tail decode %d ms",
+                         len(self.prefix), transcribe_ms)
 
             cleanup_ms = 0
             provider_name: Optional[str] = None
@@ -162,8 +189,20 @@ class MurmurApp(QObject):
         self.qt_app = qt_app
         self.settings: Settings = load_settings()
 
-        self.engine = WhisperEngine(self.settings)
+        self.engine = make_engine(self.settings)
+        self._fallback_tried = False
         self.archive = Archive()
+
+        # Always-open microphone with pre-roll; one decode worker for
+        # phrases committed while the key is held.
+        self._capture = AudioCapture(device=self.settings.input_device, preroll_ms=self.settings.preroll_ms)
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
+        self._stream_timer = QTimer(self)
+        self._stream_timer.setInterval(350)
+        self._stream_timer.timeout.connect(self._stream_tick)
+        self._commit_pos = 0
+        self._partials: List[Future] = []
+        self._t_keyup = 0.0
         self.cleanup_provider: CleanupProvider = self._build_provider()
 
         # Captured at the moment LISTENING begins so the cleanup prompt knows
@@ -196,12 +235,13 @@ class MurmurApp(QObject):
         self.read_hotkey = TapHotkey(self.settings.read_aloud_key)
         self.tray = Tray(hotkey_label=self.settings.push_to_talk_key.upper())
 
-        self._capture: Optional[AudioCapture] = None
         self._transcriber: Optional[Transcriber] = None
         self._file_job: Optional[FileTranscriber] = None
         self._model_ready = False
 
         # Wire signals
+        self._capture.samples.connect(self.pill.push_samples)
+        self._capture.error.connect(self._on_capture_error)
         self.hotkey.pressed.connect(self._on_hotkey_press)
         self.hotkey.released.connect(self._on_hotkey_release)
         self.read_hotkey.triggered.connect(self._on_read_aloud)
@@ -227,12 +267,16 @@ class MurmurApp(QObject):
     def start(self) -> None:
         log.info("MURMUR starting")
         log.info(
-            "settings: model=%s compute=%s ptt=%s cleanup=%s",
+            "settings: engine=%s model=%s compute=%s streaming=%s preroll=%dms ptt=%s cleanup=%s",
+            self.settings.stt_backend,
             self.settings.model,
             self.settings.compute_type,
+            self.settings.streaming,
+            self.settings.preroll_ms,
             self.settings.push_to_talk_key,
             self.settings.cleanup_provider,
         )
+        self._capture.open()
         latest = self.archive.all()[:1]
         if latest:
             self.pill.set_last_transcript(latest[0].text, transcript_meta(latest[0]))
@@ -264,8 +308,9 @@ class MurmurApp(QObject):
             self.reader.wait(800)
         except Exception:
             pass
-        if self._capture is not None:
-            self._capture.stop()
+        self._stream_timer.stop()
+        self._capture.close()
+        self._pool.shutdown(wait=False, cancel_futures=True)
         self.qt_app.quit()
 
     def _caption(self) -> str:
@@ -341,14 +386,18 @@ class MurmurApp(QObject):
         if any(getattr(old, f) != getattr(new_settings, f) for f in provider_fields):
             self.cleanup_provider = self._build_provider()
 
-        # Model, compute type or device: reload the model.
-        if (
+        # Engine, model, compute type or device: reload the model.
+        whisper_changed = (
             old.model != new_settings.model
             or old.compute_type != new_settings.compute_type
             or old.device != new_settings.device
+        )
+        if old.stt_backend != new_settings.stt_backend or (
+            new_settings.stt_backend == "whisper" and whisper_changed
         ):
             self._model_ready = False
-            self.engine = WhisperEngine(new_settings)
+            self._fallback_tried = False
+            self.engine = make_engine(new_settings)
             self._loader = ModelLoader(self.engine)
             self._loader.ready.connect(self._on_model_ready)
             self._loader.failed.connect(self._on_model_failed)
@@ -358,6 +407,11 @@ class MurmurApp(QObject):
         else:
             # Engine kept; update the in-engine settings so beam/vad etc apply.
             self.engine.settings = new_settings
+
+        if old.input_device != new_settings.input_device:
+            self._capture.set_device(new_settings.input_device)
+        if old.preroll_ms != new_settings.preroll_ms:
+            self._capture.set_preroll(new_settings.preroll_ms)
 
         if old.tts_rate != new_settings.tts_rate or old.tts_voice != new_settings.tts_voice:
             self.reader.set_voice(new_settings.tts_rate, new_settings.tts_voice)
@@ -459,6 +513,18 @@ class MurmurApp(QObject):
 
     def _on_model_failed(self, msg: str) -> None:
         log.error("model load failed: %s", msg)
+        if getattr(self.engine, "name", "") == "parakeet" and not self._fallback_tried:
+            # First-run download blocked, or the runtime is missing: fall
+            # back to Whisper for this session and keep going.
+            self._fallback_tried = True
+            log.warning("falling back to faster-whisper %s", self.settings.model)
+            self.engine = WhisperEngine(self.settings)
+            self._loader = ModelLoader(self.engine)
+            self._loader.ready.connect(self._on_model_ready)
+            self._loader.failed.connect(self._on_model_failed)
+            self.pill.set_readout("Whisper")
+            self._loader.start()
+            return
         self.pill.set_readout(None)
         self.pill.set_state(PillState.ERROR)
         if self.settings.play_sound_cues:
@@ -489,7 +555,7 @@ class MurmurApp(QObject):
 
     def _busy(self) -> bool:
         return (
-            (self._capture is not None and self._capture.isRunning())
+            self._capture.recording
             or (self._transcriber is not None and self._transcriber.isRunning())
             or (self._file_job is not None and self._file_job.isRunning())
         )
@@ -511,29 +577,52 @@ class MurmurApp(QObject):
         if self._foreground:
             log.info("foreground: %s (%s)", self._foreground.process, self._foreground.category)
 
+        if not self._capture.begin():
+            self.pill.set_readout("No mic", 1500)
+            return
         log.info("hotkey down -> LISTENING")
         self.pill.set_state(PillState.LISTENING)
         if self.settings.play_sound_cues:
             sounds.play_start()
 
-        self._capture = AudioCapture(device=self.settings.input_device)
-        self._capture.samples.connect(self.pill.push_samples)
-        self._capture.done.connect(self._on_capture_done)
-        self._capture.error.connect(self._on_capture_error)
-        self._capture.start()
+        self._commit_pos = 0
+        self._partials = []
+        if self.settings.streaming:
+            self._stream_timer.start()
+
+    def _stream_tick(self) -> None:
+        """While the key is held: commit finished phrases to the engine."""
+        if not self._capture.recording:
+            self._stream_timer.stop()
+            return
+        audio = self._capture.peek()
+        since = audio[self._commit_pos:]
+        try:
+            plan = find_commit(since)
+        except Exception:
+            log.exception("streaming VAD failed; streaming off for this utterance")
+            self._stream_timer.stop()
+            return
+        if plan is None:
+            return
+        chunk = since[:plan.cut]
+        self._commit_pos += plan.cut
+        if plan.has_speech:
+            engine = self.engine
+            self._partials.append(self._pool.submit(engine.transcribe, chunk))
+            log.info("streaming: committed %.1fs phrase (%d so far)", chunk.size / 16000, len(self._partials))
 
     def _on_hotkey_release(self, raw_mode: bool) -> None:
-        if self._capture is None or not self._capture.isRunning():
+        if not self._capture.recording:
             return
-        log.info("hotkey up (raw_mode=%s) -> stopping capture", raw_mode)
-        self._raw_mode_pending = raw_mode
-        self._capture.stop()
+        self._t_keyup = time.perf_counter()
+        self._stream_timer.stop()
+        audio = self._capture.end()
+        log.info("hotkey up (raw_mode=%s): %.2fs captured", raw_mode, audio.size / 16000)
         self.pill.set_state(PillState.PROCESSING)
         if self.settings.play_sound_cues:
             sounds.play_stop()
 
-    def _on_capture_done(self, audio: np.ndarray) -> None:
-        log.info("captured %d samples (%.2fs)", audio.size, audio.size / 16000)
         min_samples = 16000 * max(0, self.settings.min_utterance_ms) / 1000
         if audio.size < min_samples:
             log.info("utterance too short, skipping")
@@ -547,13 +636,17 @@ class MurmurApp(QObject):
             dictionary=tuple(self.settings.dictionary),
         )
 
+        tail = audio[self._commit_pos:] if self._partials else audio
         self._transcriber = Transcriber(
             self.engine,
             self.cleanup_provider,
-            audio,
+            tail,
             ctx,
-            raw_mode=getattr(self, "_raw_mode_pending", False),
+            raw_mode=raw_mode,
+            prefix=list(self._partials),
+            full_audio=audio,
         )
+        self._partials = []
         self._transcriber.done.connect(self._on_transcribe_done)
         self._transcriber.failed.connect(self._on_transcribe_failed)
         self._transcriber.start()
@@ -583,6 +676,10 @@ class MurmurApp(QObject):
         if self.settings.paste_on_done:
             paste_text(final)
 
+        e2e_ms = int((time.perf_counter() - self._t_keyup) * 1000) if self._t_keyup else None
+        if e2e_ms is not None:
+            log.info("key-up to pasted: %d ms", e2e_ms)
+
         t = self.archive.add(
             final,
             target_app=payload.get("target_app"),
@@ -592,6 +689,7 @@ class MurmurApp(QObject):
             audio_duration_s=payload.get("audio_duration_s"),
             transcribe_ms=payload.get("transcribe_ms"),
             cleanup_ms=payload.get("cleanup_ms"),
+            e2e_ms=e2e_ms,
         )
         self.history.on_new_transcript()
         self.pill.set_last_transcript(t.text, transcript_meta(t))

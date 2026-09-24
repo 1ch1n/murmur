@@ -29,6 +29,7 @@ class Transcript:
     audio_duration_s: Optional[float] = None
     transcribe_ms: Optional[int] = None
     cleanup_ms: Optional[int] = None
+    e2e_ms: Optional[int] = None            # key-up to pasted, the number the user feels
     word_count: int = 0
 
     def __post_init__(self) -> None:
@@ -89,6 +90,7 @@ class Archive:
         audio_duration_s: Optional[float] = None,
         transcribe_ms: Optional[int] = None,
         cleanup_ms: Optional[int] = None,
+        e2e_ms: Optional[int] = None,
     ) -> Transcript:
         text = text.strip()
         with self._lock:
@@ -103,6 +105,7 @@ class Archive:
                 audio_duration_s=audio_duration_s,
                 transcribe_ms=transcribe_ms,
                 cleanup_ms=cleanup_ms,
+                e2e_ms=e2e_ms,
             )
             self._items.append(t)
             self._save()

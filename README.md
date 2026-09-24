@@ -17,6 +17,24 @@ Windows-first. macOS / Linux deferred to later phases.
 - **Cleanup**: pluggable provider, `disabled` / `anthropic` (Claude Haiku 4.5, BYOK) / `ollama` (local)
 - **Context**: Win32 `GetForegroundWindow` → process+title → category injected into cleanup prompt
 
+## Speed
+
+Dictation latency is the time from letting go of the key to text appearing. MURMUR attacks it three ways:
+
+1. **Parakeet by default.** NVIDIA's Parakeet TDT 0.6B v3, run locally in int8 through `onnx-asr`, decodes far faster than Whisper on a CPU and scores a lower word error rate than Whisper large-v3 on the Open ASR leaderboard. Measured on a Ryzen 3700X:
+
+   | Clip | faster-whisper small.en int8 | Parakeet TDT 0.6B v3 int8 |
+   | --- | --- | --- |
+   | 5 s dictation | 2975 ms | 381 ms |
+   | 17 s call, WER | 4.3 % | 2.1 % |
+   | 78 s phone call | 16.5 s | 7.7 s |
+
+   The ~600 MB model downloads from Hugging Face on first launch. If that fails (offline), MURMUR falls back to faster-whisper for the session. Switch engines under Settings > STT.
+2. **Transcribe while you talk.** With streaming on (default), finished phrases are committed to the engine while the key is still held: a Silero VAD looks for a pause after at least two seconds of speech, that phrase is decoded in the background, and at key-up only the short tail remains. A 30-second ramble waits about as long as a 3-second one.
+3. **The mic is always open.** The input stream stays open while MURMUR is resident with a short ring buffer, so a key press costs nothing and the 300 ms of pre-roll before the press keeps the first syllable. The model is warmed with a silent decode after loading so the first utterance is not slow.
+
+Every transcript records `e2e_ms`, key-up to pasted, in History, so you can see what you actually get. Whisper's `cpu_threads` is now set to the physical core count.
+
 ## Quickstart
 
 ```powershell
@@ -26,7 +44,7 @@ pip install -r requirements.txt
 python -m murmur
 ```
 
-On first run, the `small.en` model (~244 MB) downloads to `%USERPROFILE%\.murmur\models\`.
+On first run, Parakeet (~600 MB) downloads to the Hugging Face cache. Whisper models (~244 MB for small.en) go to `%USERPROFILE%\.murmur\models\` when that engine is selected.
 
 ## Use
 
@@ -91,7 +109,7 @@ The tray app can keep running while you do this; file mode loads its own model c
 
 - **A capsule that shows your voice:** draggable, remembered position, click-to-expand menu, HiDPI-crisp, one accent colour used sparingly. Configurable size and opacity.
 - **Transcribe files from the widget or tray:** reuses the resident model, no second load.
-- **Resident model, no subprocess.** ~0.5–1.5s end-to-end on a Ryzen 3700X CPU.
+- **Resident model, no subprocess.** Parakeet by default, ~0.4 s for a 5 s utterance on a Ryzen 3700X CPU; streaming phrase commits keep long dictation just as quick.
 - **History window:** searchable archive of every transcript with copy, delete, export to `.txt` / `.json`.
 - **Stats tab:** total transcripts, words dictated, audio captured, today's count, average STT and cleanup latencies, top target apps, breakdown by category.
 - **LLM cleanup pass (optional):** removes filler ("um", "uh", "like"), adds punctuation, fixes grammar without changing meaning, preserves proper nouns and code identifiers.

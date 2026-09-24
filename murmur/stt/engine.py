@@ -8,9 +8,21 @@ from typing import Callable, Iterator, Optional
 
 import numpy as np
 
-from murmur.config import MODELS_DIR, Settings
+from murmur.config import MODELS_DIR, SAMPLE_RATE, Settings
 
 log = logging.getLogger(__name__)
+
+
+def _cpu_threads() -> int:
+    """Physical cores: CTranslate2 gains nothing from hyperthreads and the
+    default (4) leaves an 8-core desktop half idle."""
+    try:
+        import psutil
+
+        n = psutil.cpu_count(logical=False) or 4
+    except Exception:
+        n = 4
+    return max(1, min(16, n))
 
 
 @dataclass(frozen=True)
@@ -20,8 +32,19 @@ class Segment:
     text: str
 
 
+def make_engine(settings: Settings):
+    """The configured STT backend. Parakeet by default; Whisper otherwise."""
+    if (settings.stt_backend or "parakeet").lower() == "parakeet":
+        from murmur.stt.parakeet import ParakeetEngine
+
+        return ParakeetEngine(settings)
+    return WhisperEngine(settings)
+
+
 class WhisperEngine:
     """Resident faster-whisper model. Loaded once, reused per utterance."""
+
+    name = "whisper"
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -47,8 +70,24 @@ class WhisperEngine:
                 device=self.settings.device,
                 compute_type=self.settings.compute_type,
                 download_root=str(MODELS_DIR),
+                cpu_threads=_cpu_threads(),
             )
         log.info("model loaded in %.2fs", time.perf_counter() - t0)
+
+    def warmup(self) -> None:
+        """Run one short decode so the first real utterance does not pay
+        for kernel initialisation and allocation."""
+        if self._model is None:
+            return
+        t0 = time.perf_counter()
+        try:
+            silence = np.zeros(SAMPLE_RATE, dtype=np.float32)
+            segs, _ = self._model.transcribe(silence, language="en", beam_size=1, vad_filter=False)
+            for _ in segs:
+                pass
+        except Exception:
+            log.exception("warmup failed (harmless)")
+        log.info("warmup in %.2fs", time.perf_counter() - t0)
 
     def is_ready(self) -> bool:
         return self._model is not None
@@ -82,18 +121,23 @@ class WhisperEngine:
         """
         audio = self._prepare(audio)
         assert self._model is not None
-        segments, _info = self._model.transcribe(
-            audio,
-            language="en",
-            beam_size=self.settings.beam_size,
-            vad_filter=self.settings.vad_filter,
-            condition_on_previous_text=False,
-            initial_prompt=self._build_initial_prompt(),
-        )
-        for s in segments:
-            text = s.text.strip()
-            if text:
-                yield Segment(start=float(s.start), end=float(s.end), text=text)
+        # One decode at a time: streaming partials and the final tail share
+        # the model, and CTranslate2 is not meant to run two decodes at once.
+        with self._lock:
+            segments, _info = self._model.transcribe(
+                audio,
+                language="en",
+                beam_size=self.settings.beam_size,
+                vad_filter=self.settings.vad_filter,
+                condition_on_previous_text=False,
+                initial_prompt=self._build_initial_prompt(),
+            )
+            out = []
+            for s in segments:
+                text = s.text.strip()
+                if text:
+                    out.append(Segment(start=float(s.start), end=float(s.end), text=text))
+        yield from out
 
     def transcribe(
         self,

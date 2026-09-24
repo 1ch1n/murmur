@@ -36,8 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="one segment per line, prefixed with [mm:ss]")
     p.add_argument("--cleanup", action="store_true",
                    help="run the configured LLM cleanup pass on the result (off by default)")
+    p.add_argument("--backend", choices=["parakeet", "whisper"],
+                   help="STT engine (default from config; parakeet unless --model is given)")
     p.add_argument("--model", metavar="NAME",
-                   help="override the Whisper model for this run, e.g. medium.en")
+                   help="Whisper model for this run, e.g. medium.en (implies --backend whisper)")
     p.add_argument("--beam-size", type=int, metavar="N",
                    help="override beam size (1 = fastest, 5 = most accurate)")
     p.add_argument("--no-vad", action="store_true",
@@ -49,8 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _apply_overrides(settings: Settings, args: argparse.Namespace) -> Settings:
     changes = {}
+    if getattr(args, "backend", None):
+        changes["stt_backend"] = args.backend
     if args.model:
         changes["model"] = args.model
+        if not getattr(args, "backend", None):
+            changes["stt_backend"] = "whisper"
     if args.beam_size:
         changes["beam_size"] = args.beam_size
     if args.no_vad:
@@ -77,7 +83,7 @@ def _set_clipboard(text: str) -> None:
 
 
 def transcribe_file_cmd(args: argparse.Namespace) -> int:
-    from murmur.stt.engine import Segment, WhisperEngine
+    from murmur.stt.engine import Segment, make_engine
     from murmur.stt.file import decode_file, duration_s, fmt_ts
 
     logging.basicConfig(
@@ -103,9 +109,9 @@ def transcribe_file_cmd(args: argparse.Namespace) -> int:
         return 2
 
     settings = _apply_overrides(load_settings(), args)
-    err(f"{src.name}: {fmt_ts(total)} of audio, model={settings.model} beam={settings.beam_size}")
-
-    engine = WhisperEngine(settings)
+    engine = make_engine(settings)
+    desc = "parakeet-tdt-0.6b-v3 int8" if engine.name == "parakeet" else f"{settings.model} beam={settings.beam_size}"
+    err(f"{src.name}: {fmt_ts(total)} of audio, engine={desc}")
     t0 = time.perf_counter()
     engine.load()
     err(f"model loaded in {time.perf_counter() - t0:.1f}s")

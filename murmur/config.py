@@ -20,15 +20,19 @@ BLOCK_SIZE = 1600  # 100ms blocks
 @dataclass
 class Settings:
     # STT
-    model: str = "small.en"        # tiny.en | base.en | small.en | medium.en
-    compute_type: str = "int8"     # int8 | int8_float16 | float16 | float32
+    stt_backend: str = "parakeet"  # parakeet (NVIDIA Parakeet TDT 0.6B v3, int8, ~13x realtime on CPU)
+                                   # | whisper (faster-whisper, see model/compute_type below)
+    model: str = "small.en"        # whisper: tiny.en | base.en | small.en | medium.en
+    compute_type: str = "int8"     # whisper: int8 | int8_float16 | float16 | float32
     device: str = "cpu"            # cpu | cuda
-    beam_size: int = 1             # 1 = greedy (fastest); 5 = highest accuracy
+    beam_size: int = 1             # whisper: 1 = greedy (fastest); 5 = highest accuracy
     vad_filter: bool = True
+    streaming: bool = True         # transcribe finished phrases while the key is still held
 
     # Audio
     input_device: int | None = None  # None = system default
     min_utterance_ms: int = 250
+    preroll_ms: int = 300            # audio kept from before the key press
 
     # Hotkey
     push_to_talk_key: str = "right alt"  # keyboard lib name

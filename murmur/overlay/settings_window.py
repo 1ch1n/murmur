@@ -31,6 +31,7 @@ from murmur.overlay.styles import build_qss
 log = logging.getLogger(__name__)
 
 
+BACKENDS = [("parakeet", "Parakeet TDT 0.6B v3 (fast, recommended)"), ("whisper", "Whisper (faster-whisper)")]
 MODELS = ["tiny.en", "base.en", "small.en", "medium.en"]
 COMPUTE_TYPES = ["int8", "int8_float16", "float16", "float32"]
 DEVICES = ["cpu", "cuda"]
@@ -151,6 +152,20 @@ class SettingsWindow(QMainWindow):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form.setVerticalSpacing(10)
 
+        self.f_backend = QComboBox()
+        for key, label in BACKENDS:
+            self.f_backend.addItem(label, userData=key)
+        form.addRow(QLabel("ENGINE"), self.f_backend)
+
+        self.f_streaming = QCheckBox("Transcribe finished phrases while the key is held (lower latency)")
+        form.addRow(QLabel(""), self.f_streaming)
+
+        self.f_preroll = QSpinBox()
+        self.f_preroll.setRange(0, 1000)
+        self.f_preroll.setSingleStep(50)
+        self.f_preroll.setSuffix(" ms")
+        form.addRow(QLabel("PRE-ROLL"), self.f_preroll)
+
         self.f_model = QComboBox()
         self.f_model.addItems(MODELS)
         form.addRow(QLabel("WHISPER MODEL"), self.f_model)
@@ -176,9 +191,10 @@ class SettingsWindow(QMainWindow):
         form.addRow(QLabel("MIN UTTERANCE"), self.f_min_ms)
 
         hint = QLabel(
-            "Changing the model triggers a re-download/load (~244 MB for small.en). "
-            "int8 is the recommended default on CPU. Beam 1 is greedy/fastest; "
-            "increase only if accuracy on hard utterances matters more than latency."
+            "Parakeet downloads about 600 MB on first use and is roughly 6x faster than small.en "
+            "on CPU with better accuracy; it ignores the Whisper model/compute/beam fields. "
+            "Pre-roll keeps audio from just before the key press so the first syllable survives. "
+            "Whisper: int8 is the CPU default, beam 1 is fastest."
         )
         hint.setObjectName("hint")
         hint.setWordWrap(True)
@@ -324,6 +340,14 @@ class SettingsWindow(QMainWindow):
         self.f_app_ctx.setChecked(s.use_app_context)
 
         # STT
+        idx_b = 0
+        for i in range(self.f_backend.count()):
+            if self.f_backend.itemData(i) == (s.stt_backend or "parakeet"):
+                idx_b = i
+                break
+        self.f_backend.setCurrentIndex(idx_b)
+        self.f_streaming.setChecked(s.streaming)
+        self.f_preroll.setValue(s.preroll_ms)
         self._set_combo_text(self.f_model, s.model)
         self._set_combo_text(self.f_compute, s.compute_type)
         self._set_combo_text(self.f_device, s.device)
@@ -373,6 +397,9 @@ class SettingsWindow(QMainWindow):
             paste_on_done=self.f_paste.isChecked(),
             play_sound_cues=self.f_sounds.isChecked(),
             use_app_context=self.f_app_ctx.isChecked(),
+            stt_backend=self.f_backend.currentData() or "parakeet",
+            streaming=self.f_streaming.isChecked(),
+            preroll_ms=self.f_preroll.value(),
             model=self.f_model.currentText().strip(),
             compute_type=self.f_compute.currentText().strip(),
             device=self.f_device.currentText().strip(),
