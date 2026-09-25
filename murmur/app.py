@@ -680,6 +680,14 @@ class MurmurApp(QObject):
         if e2e_ms is not None:
             log.info("key-up to pasted: %d ms", e2e_ms)
 
+        self.pill.set_state(PillState.DONE)
+        if self.settings.play_sound_cues:
+            sounds.play_done()
+        # Housekeeping (History write, window refresh) waits a beat so the
+        # event loop is free while the target app consumes the paste.
+        QTimer.singleShot(120, lambda: self._finish_transcript(payload, final, raw, e2e_ms))
+
+    def _finish_transcript(self, payload: dict, final: str, raw: str, e2e_ms: Optional[int]) -> None:
         t = self.archive.add(
             final,
             target_app=payload.get("target_app"),
@@ -693,12 +701,8 @@ class MurmurApp(QObject):
         )
         self.history.on_new_transcript()
         self.pill.set_last_transcript(t.text, transcript_meta(t))
-
-        self.pill.set_state(PillState.DONE)
         self.pill.set_readout(f"{t.word_count} words", 1100)
-        if self.settings.play_sound_cues:
-            sounds.play_done()
-        QTimer.singleShot(800, lambda: self.pill.set_state(PillState.IDLE))
+        QTimer.singleShot(700, lambda: self.pill.set_state(PillState.IDLE))
 
     def _on_transcribe_failed(self, msg: str) -> None:
         log.error("transcribe failed: %s", msg)
