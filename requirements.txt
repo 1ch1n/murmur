@@ -1,5 +1,7 @@
 PySide6>=6.7.0
 faster-whisper>=1.0.3
+# PyAV 19 removed the metadata_errors kwarg that faster-whisper.decode_audio still passes
+av<19
 onnx-asr[cpu,hub]>=0.12.0
 sounddevice>=0.4.7
 soundfile>=0.12.1

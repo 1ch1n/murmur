@@ -15,13 +15,25 @@ log = logging.getLogger(__name__)
 
 def _cpu_threads() -> int:
     """Physical cores: CTranslate2 gains nothing from hyperthreads and the
-    default (4) leaves an 8-core desktop half idle."""
+    default (4) leaves an 8-core desktop half idle.
+
+    Intel hybrid parts are the exception. Every intra-op parallel region ends
+    at its slowest thread, so handing work to the efficiency cores makes the
+    whole decode run at E-core speed. Only the P-cores count there: they carry
+    SMT and the E-cores do not, so with p performance and e efficiency cores
+    physical == p + e while logical == 2p + e, which makes logical - physical
+    exactly p. Measured on an i7-1260P (4P + 8E), 6.25 s of speech:
+    489 ms at 4 threads against 863 ms at 12.
+    """
     try:
         import psutil
 
         n = psutil.cpu_count(logical=False) or 4
+        logical = psutil.cpu_count(logical=True) or n
     except Exception:
-        n = 4
+        n = logical = 4
+    if n < logical < 2 * n:          # hybrid: some cores have SMT, some do not
+        n = logical - n
     return max(1, min(16, n))
 
 
